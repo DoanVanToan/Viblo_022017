@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Viblo_022017</string>
+    <string name="upload_media_false">Upload media fail</string>
+    <string name="permission_denied">Permission denied</string>
+</resources>
