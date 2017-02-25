@@ -1,6 +1,7 @@
 package lol.toandoan.com.viblo_022017;
 
 import android.app.ProgressDialog;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -8,6 +9,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.support.annotation.RequiresApi;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
@@ -18,9 +20,7 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import okhttp3.MediaType;
 import okhttp3.MultipartBody;
@@ -53,7 +53,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         findViewById(R.id.button_select_image).setOnClickListener(this);
-        findViewById(R.id.button_upload_image).setOnClickListener(this);
         mTextResult = (TextView) findViewById(R.id.text_result);
         mTextInput = (TextView) findViewById(R.id.text_input);
     }
@@ -63,9 +62,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         switch (view.getId()) {
             case R.id.button_select_image:
                 requestPermionAndPickImage();
-                break;
-            case R.id.button_upload_image:
-                uploadFiles();
                 break;
             default:
                 break;
@@ -105,30 +101,39 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         // Gọi intent của hệ thống để chọn ảnh nhé.
         Intent intent = new Intent();
         intent.setType("image/*");
+        // Thêm dòng này để có thể select nhiều ảnh trong 1 lần nhé các bạn
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         intent.setAction(Intent.ACTION_GET_CONTENT);
-        startActivityForResult(Intent.createChooser(intent, "Select a File to Upload"),
+        startActivityForResult(Intent.createChooser(intent, "Select Files to Upload"),
                 PICK_IMAGE_REQUEST);
     }
 
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN)
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == PICK_IMAGE_REQUEST && resultCode == RESULT_OK && data != null &&
-                data.getData() != null) {
-            // Khi đã chọn xong ảnh thì chúng ta tiến hành upload thôi
-            Uri uri = data.getData();
-            mUris.add(uri);
-            mBuilder.append("-")
-                    .append(getRealPathFromURI(uri))
-                    .append("\n");
-            mTextInput.setText(mBuilder.toString());
+                data.getClipData() != null) {
+            ClipData mClipData = data.getClipData();
+            for (int i = 0; i < mClipData.getItemCount(); i++) {
+                ClipData.Item item = mClipData.getItemAt(i);
+                Uri uri = item.getUri();
+                mUris.add(uri);
+                mBuilder.append(i + "-")
+                        .append(getRealPathFromURI(uri))
+                        .append("\n");
+                mTextInput.setText(mBuilder.toString());
+            }
+
+            // Sau khi get đc data thì ta upload thôi
+            uploadFiles();
         }
     }
 
     private String getRealPathFromURI(Uri contentURI) {
         String result;
         Cursor cursor = getContentResolver().query(contentURI, null, null, null, null);
-        if (cursor == null) { // Source is Dropbox or other similar local file path
+        if (cursor == null) {
             result = contentURI.getPath();
         } else {
             cursor.moveToFirst();
@@ -155,19 +160,22 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 .client(new OkHttpClient())
                 .build();
 
-        MultipartBody.Part[] parts = new MultipartBody.Part[mUris.size()];
+        MultipartBody.Builder builder = new MultipartBody.Builder();
+        builder.setType(MultipartBody.FORM);
         for (int i = 0; i < mUris.size(); i++) {
             Uri uri = mUris.get(i);
             File file = new File(getRealPathFromURI(uri));
             // Khởi tạo RequestBody từ những file đã được chọn
             RequestBody requestBody = RequestBody.create(
-                    MediaType.parse("multipart/form-data"),
+                    MediaType.parse("image/*"),
                     file);
-            parts[i] = MultipartBody.Part.createFormData("uploaded_file", file.getName(), requestBody);
+            // Add thêm request body vào trong builder
+            builder.addFormDataPart("uploaded_file", file.getName(), requestBody);
         }
 
+        MultipartBody requestBody = builder.build();
         UploadService service = retrofit.create(UploadService.class);
-        Call<ResponseBody> call = service.uploadFileMultilPart(parts);
+        Call<ResponseBody> call = service.uploadFileMultilPart(requestBody);
         call.enqueue(new Callback<ResponseBody>() {
             @Override
             public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
